@@ -21534,13 +21534,13 @@ function auto_feed() {
                 const source = SRC_MAP[raw_info.medium_sel] ?? '其它'
 
                 // 国家：仅当描述里能识别、且命中白名单时才采用；否则保持 '其他'
-                let country = '其他'
+                let country = '其它'
                 const region = extractRegion(raw_info.descr)
                 if (region && REGIONS.includes(region.split('/')[0].trim())) {
                     country = region.split('/')[0].trim() // 可能是“中国大陆/台湾”并列，取第一段
                 }
                 // 若上游显式标注来源为“大陆”（大陆发片），直接覆盖为国家=大陆
-                if (raw_info.source_sel === '大陆') country = '大陆'
+                if (raw_info.source_sel === '中国大陆') country = '大陆'
 
                 return { type, country, standard, source }
             }
