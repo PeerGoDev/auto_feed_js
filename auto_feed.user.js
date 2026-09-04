@@ -21439,16 +21439,19 @@ function auto_feed() {
                  * 图片、加粗、斜体、链接、引用转为对应 Markdown 语法。
                  */
                 function bbcode2markdown(text) {
+
+                    text = text.replace(/\[size=\d\]/ig, '').replace(/\[\/size\]/ig, '');
+                    text = text.replace(/\[font=.+?\]/ig, '').replace(/\[\/font\]/ig, '');
+                    text = text.replace(/\[color=.+?\]/ig, '').replace(/\[\/color\]/ig, '');
+                    text = text.replace(/\[img\](.*?)\[\/img\]/ig, '![_]($1)');
+                    text = text.replace(/\[b\]\s*/ig, '**').replace(/\s*\[\/b\]/ig, '**');
+                    text = text.replace(/\[i\]\s*/ig, '*').replace(/\s*\[\/i\]/ig, '*');
+                    text = text.replace(/\[url=([^\]]*?)\](.*?)\[\/url\]/ig, '[$2]($1)');
+                    text = text.replace(/\[quote\](.*?)\[\/quote\]/isg, (m, n) => '> '+ n.split('\n').join('\n> ')+'\n\n');
+
+                    // 关键修正：在每个换行符前补上两个空格，强制 Markdown 渲染换行
+                    text = text.replace(/\n/g, '  \n');
                     return text
-                        .replace(/\[(size|font|color)(?:=[^\]]*)?\]|\[\/\1\]/ig, '')
-                        .replace(/\[img\](.*?)\[\/img\]/ig, '![_]($1)')
-                        .replace(/\[b\]\s*|\s*\[\/b\]/ig, '**')
-                        .replace(/\[i\]\s*|\s*\[\/i\]/ig, '*')
-                        .replace(/\[url=([^\]]*?)\](.*?)\[\/url\]/ig, '[$2]($1)')
-                        .replace(
-                            /\[quote\](.*?)\[\/quote\]/isg,
-                            (m, n) => '> ' + n.split('\n').join('\n> ') + '\n\n'
-                        )
                 }
 
                 const api = {
