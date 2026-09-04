@@ -4858,8 +4858,8 @@ function fill_torrent(forward_site, container, name) {
         ant_form_instance?.setFieldsValue({ 'fileList': [...container.files].map(f =>{ f.originFileObj = f; return f}) }); //files要转为数组，并且添加originFileObj属性为自身
     } else if (forward_site == 'RouSi') {
         var i_evt = new Event("change", { bubbles: true, cancelable: false });
-        $('input[accept=".torrent"]')[0].files = container.files;
-        $('input[accept=".torrent"]')[0].dispatchEvent(i_evt);
+        $('input[accept^=".torrent"]')[0].files = container.files;
+        $('input[accept^=".torrent"]')[0].dispatchEvent(i_evt);
     } else {
         $('input[name=file]')[0].files = container.files;
     }
@@ -21184,118 +21184,573 @@ function auto_feed() {
         }
 
         else if (forward_site == 'RouSi') {
-            var type_dict = {'电影': 'movie', '剧集': 'tv', '动漫': 'animation', '综艺': 'variety', '音乐': 'music', '纪录': 'documentary', '体育': 'sports', '软件': 'software', '学习': 'ebook'};
-            var r_type = 'other';
-            if (type_dict.hasOwnProperty(raw_info.type)){
-                r_type = type_dict[raw_info.type];
-            }
-            var standard_dict = {'8K': '其它', '4320p': '其它', '4K': '4K / 2160p', '1080p': '1080p', '1080i': '1080i', '720p': '720p', 'SD': 'SD', '480p': 'SD'};
-            var r_standard = '其它';
-            if (standard_dict.hasOwnProperty(raw_info.standard_sel)){
-                r_standard = standard_dict[raw_info.standard_sel];
-            }
-            var r_source = '其它';
-            switch (raw_info.medium_sel){
-                case 'Blu-ray': case 'Remux': case 'Encode': r_source = 'Blu-ray'; break;
-                case 'UHD': r_source = 'UHD Blu-ray'; break;
-                case 'WEB-DL': r_source = 'WEB-DL'; break;
-                case 'HDTV': r_source = 'HDTV'; break;
-                case 'DVD': r_source = 'DVDRip'; break;
-            }
-            var r_country = '其他';
-            const regions = ["大陆", "香港", "台湾", "日本", "韩国", "美国", "英国", "法国", "德国", "意大利", "西班牙", "俄罗斯", "新西兰", "加拿大", "印度", "泰国", "澳大利亚"];
-            var reg_region = raw_info.descr.match(/◎(地.{0,10}?区|国.{0,10}?家|产.{0,10}?地|◎產.{0,5}?地)([^\r\n]+)/);
-            if (!reg_region) {
-                reg_region = raw_info.descr.match(/(地.{0,10}?区|国.{0,10}?家|产.{0,10}?地|◎產.{0,5}?地)([^\r\n]+)/);
-            }
-            if (reg_region) {
-                region = reg_region[2].split('/')[0].trim();
-                if (regions.indexOf(region) > -1) {
-                    r_country = region;
-                }
-            }
-            if (raw_info.source_sel == '大陆') {
-                r_country = '大陆';
-            }
-            function smartFill(input, value, type = 'input') {
-                const el = (typeof input === 'string') ? document.querySelector(input) : input;
-                if (!el) {
-                    console.warn(`未找到元素!!`);
-                    return;
-                }
-                switch (type) {
-                    case 'checkbox':
-                        const targetState = !!value; 
-                        if (el.checked !== targetState) {
-                            // 直接触发点击，这会带动框架内部的状态更新
-                            el.click(); 
-                        }
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                    case 'input': case 'textarea':
-                        const proto = el.tagName === 'TEXTAREA' 
-                            ? window.HTMLTextAreaElement.prototype 
-                            : window.HTMLInputElement.prototype;
-                        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-                        if (setter) {
-                            setter.call(el, value);
-                        } else {
-                            el.value = value;
-                        }
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                    case 'select':
-                        el.value = value;
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                }
-            }
-            function autoClickCategories(introText) {
-                const categoryMatch = introText.match(/◎类.*?别\s+([^\n\r]+)/);
-                if (!categoryMatch) {
-                    console.warn("未在简介中找到类别信息");
-                    return;
-                }
-                const targetCategories = categoryMatch[1].split(/[ /／]+/).map(s => s.trim());
-                console.log("识别到的类型:", targetCategories);
-                const buttons = document.querySelectorAll('div.flex.flex-wrap.gap-2 button[type="button"]');
+            // RousiKit：站点通用自动化工具集（IIFE 隔离内部实现，仅暴露下方 api）
+            const RousiKit = (() => {
+                // 一次性选择（querySelector 封装）
+                const $ = (sel, root = document) => root.querySelector(sel)
+                // 批量选择，转成真数组便于 .filter/.find（默认返回静态 NodeList 用起来麻烦）
+                const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel))
+                // Promise 版 setTimeout
+                const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+                // 弹层展开/收起或操作生效后的固定等待毫秒数
+                const POPUP_DELAY = 120
 
-                buttons.forEach(btn => {
-                    const btnText = btn.textContent.trim();
-                    if (targetCategories.includes(btnText)) {
-                        btn.click();
-                        console.log(`已点击按钮: ${btnText}`);
+                /**
+                 * 轮询等待某个条件成立。
+                 * @param {() => any} check 返回真值即结束并返回该值
+                 * @param {{ timeout?: number, msg?: string }} [opts]
+                 */
+                async function waitFor(check, { timeout = 15000, msg = "等待超时" } = {}) {
+                    // 以 100ms 间隔轮询，直到条件成立或超时抛错
+                    const deadline = Date.now() + timeout
+                    while (Date.now() < deadline) {
+                        const value = check()
+                        if (value) return value
+                        await sleep(100)
                     }
-                });
-            }
-            const fileWatcher = setInterval(() => {
-                const fileInput = document.querySelector('input[type="file"]');
-                if (!fileInput) return;
-                if (fileInput.files && fileInput.files.length > 0) {
-                    clearInterval(fileWatcher);
-                    smartFill('input[placeholder="种子标题"]', raw_info.name, 'input');
-                    smartFill('input[placeholder="副标题"]', raw_info.small_descr, 'input');
-                    setTimeout(() => {
-                        smartFill('input[placeholder="填入 IMDb 链接"]', raw_info.url, 'input');
-                        smartFill('input[placeholder="填入 豆瓣 链接"]', raw_info.dburl, 'input');
-                        autoClickCategories(raw_info.descr);
-                        smartFill('textarea[placeholder="粘贴 MediaInfo 或 BDInfo 信息"]', mediainfo_mteam, 'textarea');
-                        smartFill('textarea[placeholder*="种子描述"]', raw_info.descr, 'textarea');
-                        if (if_uplver) {
-                            const anonCheckbox = Array.from(document.querySelectorAll('label'))
-                                .find(l => l.innerText.includes('匿名上传'))
-                                ?.querySelector('input');
-                            smartFill(anonCheckbox, true, 'checkbox');
-                        }
-                    }, 1500);
-                    smartFill(document.querySelectorAll('select')[0], r_type, 'select');
-                    smartFill(document.querySelectorAll('select')[1], r_country, 'select');
-                    smartFill(document.querySelectorAll('select')[2], r_standard, 'select');
-                    smartFill(document.querySelectorAll('select')[3], r_source, 'select');
+                    throw new Error(msg)
                 }
-            }, 1000);
+
+                /**
+                 * 解析“元素 | 选择器”参数：字符串会在 document 中等待出现后返回。
+                 * @param {string | Element} target
+                 * @param {{ timeout?: number, msg?: string, enabled?: boolean }} [opts] enabled=true 时还会等待元素可用（无 disabled 属性）
+                 */
+                async function resolve(target, { timeout = 15000, msg, enabled = false } = {}) {
+                    // 已传入 DOM 元素则直接校验非空并返回，不走轮询
+                    if (typeof target !== "string") {
+                        if (!target) throw new Error(msg || "目标元素为空")
+                        return target
+                    }
+                    // 字符串选择器则等待它出现（React 异步渲染阶段可能暂不存在）
+                    return waitFor(
+                        () => {
+                            const el = $(target)
+                            // enabled=true 时把 disabled 的元素视为“还没就绪”，继续等
+                            if (!el || (enabled && el.hasAttribute("disabled"))) return null
+                            return el
+                        },
+                        { timeout, msg: msg || `找不到元素: ${target}` }
+                    )
+                }
+
+                // React 在 input/textarea 上做了受控拦截，直接赋值不会触发 onChange。
+                // 必须绕过实例上的 value 描述符，用原型原生 setter 写入，再派发 input 事件。
+                function setNativeValue(el, value) {
+                    const proto =
+                        el instanceof HTMLTextAreaElement
+                            ? HTMLTextAreaElement.prototype
+                            : HTMLInputElement.prototype
+                    const setter = Object.getOwnPropertyDescriptor(proto, "value").set
+                    setter.call(el, value)
+                }
+
+                /**
+                 * 填充 input / textarea（自动触发 React onChange / 表单 onInput）。
+                 * @param {string | HTMLInputElement | HTMLTextAreaElement} target
+                 * @param {string} value
+                 * @returns {Promise<Element>} 写入后的元素
+                 */
+                async function setTextValue(target, value) {
+                    const el = await resolve(target, { msg: "目标 input 不存在" })
+                    // focus 让受控组件先挂上，随后同步派发 input/change 事件触发 React onChange
+                    el.focus()
+                    setNativeValue(el, value)
+                    el.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }))
+                    el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }))
+                    await sleep(50) // 等 React 完成一轮提交
+                    return el
+                }
+
+                /**
+                 * 设置 Base UI Checkbox 的选中状态（幂等）。
+                 * @param {string | Element} target 传入 span[role=checkbox]（或它的 id/选择器）
+                 * @param {boolean} checked
+                 */
+                async function setCheckbox(target, checked) {
+                    const el = await resolve(target, {
+                        msg: "目标 checkbox 不存在（应为 span[role=checkbox]）",
+                    })
+                    const isChecked = el.getAttribute("aria-checked") === "true"
+                    if (isChecked !== checked) el.click()
+                    return el
+                }
+
+                // 当前可见的弹层选项（弹层关闭时 option 不挂载/不可见，自动过滤）
+                function visibleOptions() {
+                    return $$('[role="option"]').filter((el) => {
+                        const r = el.getBoundingClientRect()
+                        return r.width > 0 && r.height > 0
+                    })
+                }
+
+                // 点开 Select 的 trigger（role=combobox）。已展开则跳过，避免重复点击关闭弹层
+                async function openCombobox(trigger) {
+                    if (trigger.getAttribute("aria-expanded") !== "true") {
+                        trigger.click()
+                        await sleep(POPUP_DELAY) // 等弹层挂载/展开动画完成
+                    }
+                }
+
+                /**
+                 * 点开 Base UI Select 的 trigger（role=combobox），按选项显示文本精确点选。
+                 * 找不到对应选项时返回 null（不会抛错中断流程）。
+                 * @param {string | Element} triggerTarget trigger 元素或选择器
+                 * @param {string} optionText 选项的可见文本（需与渲染文本完全一致）
+                 * @param {{ timeout?: number }} [opts]
+                 * @returns {Promise<Element | null>}
+                 */
+                async function chooseSelectOption(triggerTarget, optionText, { timeout } = {}) {
+                    const trigger = await resolve(triggerTarget, {
+                        timeout,
+                        enabled: true,
+                        msg: `找不到 Select trigger: ${triggerTarget}`,
+                    })
+                    await openCombobox(trigger)
+
+                    try {
+                        const option = await waitFor(
+                            () => visibleOptions().find((o) => o.textContent.trim() === optionText),
+                            { timeout, msg: `找不到选项: ${optionText}` }
+                        )
+                        // 滚到可视区中部再点，防被页面底部遮挡/虚拟滚动
+                        option.scrollIntoView?.({ block: "center" })
+                        option.click()
+
+                        // 等 React 把值渲染回 trigger，确认生效
+                        await waitFor(() => trigger.textContent.includes(optionText), {
+                            timeout,
+                            msg: `选项未生效: ${optionText}`,
+                        })
+                        return option
+                    } catch (err) {
+                        // 找选项/确认生效任一环节失败都不抛错：返回 null，交由调用方决定兜底策略
+                        console.warn(err.message)
+                        return null
+                    }
+                }
+
+                /**
+                 * 不知道选项文本时：打开 Select 并点选弹层中第一个“未选中”的选项。
+                 * 弹层里没有可选项时返回 null。
+                 * @param {string | Element} triggerTarget
+                 * @param {{ timeout?: number }} [opts]
+                 * @returns {Promise<Element | null>}
+                 */
+                async function chooseFirstOption(triggerTarget, { timeout } = {}) {
+                    const trigger = await resolve(triggerTarget, {
+                        timeout,
+                        enabled: true,
+                        msg: `找不到 Select trigger: ${triggerTarget}`,
+                    })
+                    await openCombobox(trigger)
+
+                    try {
+                        // 优先找“完全未选中”的项（无 aria-selected 属性也算未选中）
+                        const option = await waitFor(
+                            () =>
+                                visibleOptions().find(
+                                    (o) =>
+                                        !o.hasAttribute("aria-selected") ||
+                                        o.getAttribute("aria-selected") !== "true"
+                                ),
+                            { timeout, msg: "弹层里没有可选选项" }
+                        )
+                        option.click()
+                        await sleep(80)
+                        return option
+                    } catch (err) {
+                        console.warn(err.message)
+                        return null
+                    }
+                }
+
+                /**
+                 * 返回某个容器（或整个 document）内所有 Base UI Select 的 trigger（role=combobox），
+                 * 已过滤掉不可见 / disabled 的。
+                 * @param {string | Element | null} [root]
+                 */
+                function selectTriggers(root = null) {
+                    const rootEl =
+                        typeof root === "string" ? $(root) : root instanceof Element ? root : document
+                    return $$('[role="combobox"]', rootEl).filter(
+                        (el) => el.getClientRects().length && !el.hasAttribute("disabled")
+                    )
+                }
+
+                /**
+                 * 在已打开的下拉弹层中，按显示文本精确查找 option；找不到返回 null。
+                 * @param {string} text
+                 */
+                function optionByText(text) {
+                    return visibleOptions().find((o) => o.textContent.trim() === text) ?? null
+                }
+
+                /**
+                 * 收起当前打开的下拉（Esc），常用于“没有匹配项”时的清理。
+                 * @param {Element} [trigger]
+                 */
+                async function closeSelect(trigger) {
+                    ; (trigger ?? document).dispatchEvent(
+                        new KeyboardEvent("keydown", {
+                            key: "Escape",
+                            bubbles: true,
+                            cancelable: true,
+                        })
+                    )
+                    await sleep(100)
+                }
+
+                /**
+                 * 等待多个选择器中第一个出现的元素（任一命中即返回）。
+                 * @param {string[]} selectors
+                 */
+                async function waitFirst(...selectors) {
+                    return waitFor(
+                        () => selectors.map((s) => $(s)).find(Boolean),
+                        { msg: `找不到元素: ${selectors[0]}` }
+                    )
+                }
+
+                function isPressed(el) {
+                    // aria-pressed 反映 Base UI ToggleGroup 项的“按下”状态
+                    return el.getAttribute("aria-pressed") === "true"
+                }
+
+                /**
+                 * 设置 Base UI ToggleGroup（多选小标签）的按下状态，labels 传需要按下的文本。
+                 * 未包含在 labels 里但当前按下的项会被取消（适合需要精确值的场景）。
+                 * @param {string | Element} rootTarget ToggleGroup 容器或其选择器（如 [data-facet-id] 所在 Field）
+                 * @param {string[]} labels
+                 */
+                async function setToggleGroup(rootTarget, labels) {
+                    const root = await resolve(rootTarget, { msg: "找不到 ToggleGroup 容器" })
+                    for (const item of $$('[data-slot="toggle-group-item"]', root)) {
+                        const label = item.textContent.trim()
+                        const pressed = isPressed(item)
+                        // 期望按下与实际状态一致则跳过（幂等）；labels 里未列出的当前按下项会被取消
+                        if (labels.includes(label) !== pressed) item.click()
+                    }
+                    return root
+                }
+
+                /**
+                 * 把 BBCode 描述转成 Markdown：丢弃 size/font/color 排版标签，
+                 * 图片、加粗、斜体、链接、引用转为对应 Markdown 语法。
+                 */
+                function bbcode2markdown(text) {
+                    return text
+                        .replace(/\[(size|font|color)(?:=[^\]]*)?\]|\[\/\1\]/ig, '')
+                        .replace(/\[img\](.*?)\[\/img\]/ig, '![_]($1)')
+                        .replace(/\[b\]\s*|\s*\[\/b\]/ig, '**')
+                        .replace(/\[i\]\s*|\s*\[\/i\]/ig, '*')
+                        .replace(/\[url=([^\]]*?)\](.*?)\[\/url\]/ig, '[$2]($1)')
+                        .replace(
+                            /\[quote\](.*?)\[\/quote\]/isg,
+                            (m, n) => '> ' + n.split('\n').join('\n> ') + '\n\n'
+                        )
+                }
+
+                const api = {
+                    sleep,
+                    waitFor,
+                    resolve,
+                    select: $,
+                    selectAll: $$,
+                    selectTriggers,
+                    optionByText,
+                    closeSelect,
+                    setTextValue,
+                    setCheckbox,
+                    chooseSelectOption,
+                    chooseFirstOption,
+                    setToggleGroup,
+                    waitFirst,
+                    bbcode2markdown,
+                }
+
+                return api
+            })()
+
+            // ==== 以下为 RouSi 专属填充逻辑（基于上面的 RousiKit 组装） ====
+
+            // 描述里能识别出的受支持国家/地区白名单；不在名单内的保持默认“其他”
+            const REGIONS = ["大陆", "香港", "台湾", "日本", "韩国", "美国", "英国", "法国", "德国", "意大利", "西班牙", "俄罗斯", "新西兰", "加拿大", "印度", "泰国", "澳大利亚"]
+
+            /**
+            * 从描述文本里抽“地区/国家”值（形如 `◎产　　地　中国大陆` 或行内 `地区: 韩国`）。
+            * 先匹配带行首 ◎ 标记的规范格式；失败再退化为不要求 ◎ 的宽松匹配。
+            * @returns {string | undefined} 命中的值串（未做进一步清洗）
+            */
+            function extractRegion(descr) {
+                const m =
+                    descr.match(/◎(?:地.{0,10}?区|国.{0,10}?家|产.{0,10}?地|產.{0,5}?地)([^\r\n]+)/) ??
+                    descr.match(/(?:地.{0,10}?区|国.{0,10}?家|产.{0,10}?地|產.{0,5}?地)([^\r\n]+)/)
+                return m?.[1]
+            }
+
+            /**
+            * 把外层 raw_info 的字段值映射为 RouSi 表单下拉需要的文案。
+            * 查表未命中一律兜底 '其它'（选择框里保证有该选项，不会选错）。
+            * @returns {{ type: string, country: string, standard: string, source: string }}
+            */
+            function mapFields(raw_info) {
+                // 分类映射：上游叫法(短剧/剧集等) -> 站点标准分类
+                const TYPE_MAP = {
+                    电影: '电影',
+                    剧集: '电视剧',
+                    短剧: '电视剧',
+                    动漫: '动漫',
+                    综艺: '综艺',
+                    音乐: '音乐',
+                    纪录: '纪录片',
+                    体育: '体育',
+                    软件: '软件',
+                }
+                // 分辨率映射：8K/4320p 站点暂未开放则并入 '其它'，480p 归入 SD
+                const STD_MAP = {
+                    '8K': '其它',
+                    '4320p': '其它',
+                    '4K': '4K / 2160p',
+                    '1080p': '1080p',
+                    '1080i': '1080i',
+                    '720p': '720p',
+                    SD: 'SD',
+                    '480p': 'SD',
+                }
+                // 压制来源映射：Blu-ray/Remux/Encode 都是原盘系归为 'Blu-ray'
+                const SRC_MAP = {
+                    'Blu-ray': 'Blu-ray',
+                    Remux: 'Blu-ray',
+                    Encode: 'Blu-ray',
+                    UHD: 'UHD Blu-ray',
+                    'WEB-DL': 'WEB-DL',
+                    HDTV: 'HDTV',
+                    DVD: 'DVDRip',
+                }
+
+                const type = TYPE_MAP[raw_info.type] ?? '其它'
+                const standard = STD_MAP[raw_info.standard_sel] ?? '其它'
+                const source = SRC_MAP[raw_info.medium_sel] ?? '其它'
+
+                // 国家：仅当描述里能识别、且命中白名单时才采用；否则保持 '其他'
+                let country = '其他'
+                const region = extractRegion(raw_info.descr)
+                if (region && REGIONS.includes(region.split('/')[0].trim())) {
+                    country = region.split('/')[0].trim() // 可能是“中国大陆/台湾”并列，取第一段
+                }
+                // 若上游显式标注来源为“大陆”（大陆发片），直接覆盖为国家=大陆
+                if (raw_info.source_sel === '大陆') country = '大陆'
+
+                return { type, country, standard, source }
+            }
+
+            // 页面级查询：限定在发布表单容器内，避免误选页面上其他无关的下拉
+            function selectTriggers() {
+                const root = document.querySelector("#torrent-upload-form") ?? document
+                return RousiKit.selectTriggers(root)
+            }
+
+            // 已知字段 -> 输入框 id 的映射；未列出的字段走 fillText 里的 placeholder 兜底
+            const FIELD_SELECTORS = {
+                标题: "#torrent-title",
+                副标题: "#torrent-subtitle",
+                imdb: "#torrent-imdb-id",
+                豆瓣: "#torrent-douban-id",
+                media: "#torrent-media-info",
+            }
+
+            async function fillText(labelLike, value) {
+                // 优先 id，其次 placeholder，兼容不同版本页面
+                const sel = FIELD_SELECTORS[labelLike]
+                const el = sel
+                    ? document.querySelector(sel)
+                    : Array.from(document.querySelectorAll("input,textarea")).find((i) =>
+                        (i.placeholder || "").includes(labelLike)
+                    )
+                if (!el) return console.warn("跳过:", labelLike)
+                await RousiKit.setTextValue(el, value)
+            }
+
+            // 三个 facet 下拉的 trigger id 与 mapFields() 返回值字段的对应关系（数据驱动，避免重复代码）
+            const FACETS = [
+                { id: 'torrent-facet-region', field: 'country' },
+                { id: 'torrent-facet-resolution', field: 'standard' },
+                { id: 'torrent-facet-source', field: 'source' },
+            ]
+
+            // 逐个设置分类属性：先精确匹配文本，匹配不到则“选第一个未选中项”兜底
+            async function setFacets(r) {
+                const triggers = selectTriggers()
+                for (const { id, field } of FACETS) {
+                    const trigger = triggers.find((a) => a.id === id)
+                    if (!trigger) continue
+                    const ok = await RousiKit.chooseSelectOption(trigger, r[field])
+                    if (!ok) await RousiKit.chooseFirstOption(trigger)
+                }
+            }
+
+            // 从描述里解析“类别：xx/xx”一行，精确多选 toggle 标签（复用 RousiKit.setToggleGroup）
+            async function autoClickCategories(introText) {
+                const m = introText.match(/◎类.*?别\s+([^\r\n]+)/)
+                if (!m) return
+                // 类别常以空格/斜杠分隔，如 “动作 科幻 / 冒险”
+                const want = m[1].split(/[ /／]+/).map((s) => s.trim())
+                await RousiKit.setToggleGroup(document, want)
+            }
+
+            /**
+             * 从 pic_info(BBCode) 提取截图的全尺寸链接：
+             * - 取 [url=...] 的目标地址（外层原图），其内嵌的 .md. 缩略图随之被整体消费、忽略；
+             * - 再补上未被 url 包裹的裸 [img]；
+             */
+            function screenshotUrls(pic_info) {
+                const urls = []
+                for (const m of pic_info.matchAll(
+                    /\[url=([^\]]+)\][\s\S]*?\[\/url\]|\[img\]\s*([^\s\[\]]+?)\s*\[\/img\]/gi
+                )) {
+                    const u = m[1] ?? m[2]
+                    if (u && !urls.includes(u)) urls.push(u)
+                }
+                return urls
+            }
+
+            /**
+             * 下载单张图片为 Blob：优先用油猴 GM_xmlhttpRequest（跨域无限制、可绕过防盗链/CORS），
+             * 未授权（typeof 为 undefined，非油猴/未 @grant）时退化为普通 fetch。
+             * 使用 GM 版需在脚本头部声明：// @grant GM_xmlhttpRequest
+             */
+            function fetchImageAsBlob(url) {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    return new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url,
+                            responseType: 'blob',
+                            timeout: 30000,
+                            onload: (res) =>
+                                res.status >= 200 && res.status < 300
+                                    ? resolve(res.response)
+                                    : reject(new Error(`HTTP ${res.status}`)),
+                            onerror: () => reject(new Error('网络错误')),
+                            ontimeout: () => reject(new Error('下载超时')),
+                        })
+                    })
+                }
+                return fetch(url).then((res) => res.blob())
+            }
+
+            /**
+             * 把截图链接下载成 File 并注入 #torrent-screenshots 上传组件。
+             * 该组件是 Base UI 的 <input type="file" multiple>，没有填 URL 的入口，
+             * 只能逐张下载转成 File，再用 DataTransfer 赋值 input.files。
+             * 任一张下载失败只告警跳过，不中断整体。
+             */
+            async function addScreenshots(pic_info) {
+                debugger
+                if (!pic_info) return
+                const input = document.querySelector('#torrent-screenshots')
+                if (!input?.files) return console.warn('找不到截图上传组件 #torrent-screenshots')
+
+                const urls = screenshotUrls(pic_info)
+                if (!urls.length) return console.warn('pic_info 里没有可用的截图链接')
+
+                //最多只要6张图
+                if (urls.length > 6) {
+                    urls.length = 6
+                }
+
+                const settled = await Promise.allSettled(
+                    urls.map(async (url) => {
+                        const blob = await fetchImageAsBlob(url)
+                        const name =
+                            decodeURIComponent(url.split('?')[0].split('/').pop()) || 'screenshot.png'
+                        return new File([blob], name, { type: blob.type || 'image/png' })
+                    })
+                )
+                const files = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value)
+                const failed = settled.length - files.length
+                if (failed) console.warn(`截图下载失败 ${failed} 张`)
+                if (!files.length) return
+
+                // React 受控 file input：改 files 后需派发 change 事件，组件才会刷新待上传列表
+                const dt = new DataTransfer()
+                files.forEach((f) => dt.items.add(f))
+                input.files = dt.files
+                input.dispatchEvent(new Event('change', { bubbles: true }))
+                console.log(`已添加截图 ${files.length} 张`)
+            }
+
+            // 防重入标记：一次上传页只跑一轮填充
+            let started = false
+
+            /**
+            * 填充主流程。外层(文件选择 watcher)调用；started 保证只执行一次。
+            * 全程 try/catch：任一步失败只 console.warn，不中断整段脚本。
+            * @param {object} raw_info 上游种子/影视信息
+            * @param {*} mediainfo_mteam 生成好的 mediainfo 文本
+            * @param {boolean} if_uplver 是否匿名发布（需勾选匿名选项）
+            */
+            async function run(raw_info, mediainfo_mteam, if_uplver) {
+                if (started) return
+                started = true
+                try {
+                    const r = mapFields(raw_info)
+                    await fillText("标题", raw_info.name)
+                    await fillText("副标题", raw_info.small_descr)
+
+                    // 1) 先选分类 —— 这是后续 facets 加载的前提
+                    const triggers = selectTriggers()
+                    const categoryTrigger = triggers[0]
+                    if (categoryTrigger) {
+                        const ok = await RousiKit.chooseSelectOption(categoryTrigger, r.type)
+                        if (!ok) await RousiKit.chooseFirstOption(categoryTrigger)
+                    }
+                    await RousiKit.sleep(2000) // 等 facets 异步加载完成（可换成等待特定 facet 出现）
+
+                    // 2) 再填分类属性（重新获取节点，避免旧引用被 React 重置）
+                    await setFacets(r)
+
+                    // 3) 文本域（描述若是 contentEditable 编辑器，另行处理）
+                    await fillText("imdb", raw_info.url)
+                    await fillText("豆瓣", raw_info.dburl)
+                    await fillText("media", mediainfo_mteam)
+                    const descEl = Array.from(document.querySelectorAll("textarea")).find((i) =>
+                        (i.placeholder || "").includes("种子描述")
+                    )
+
+                    // 注意：该函数会就地改写 raw_info.descr（剥离/替换描述里的图片），
+                    // 所以必须先于下面 setTextValue / autoClickCategories 对 descr 的使用而调用。
+                    const pic_info = get_mediainfo_picture_from_descr(raw_info.descr).pic_info
+                    // 从这里开始添加图片：把截图链接下载后注入 torrent-screenshots 上传组件
+                    await addScreenshots(pic_info)
+                    if (descEl) await RousiKit.setTextValue(descEl, RousiKit.bbcode2markdown(raw_info.descr))
+
+                    // 4) 类型多选按钮
+                    await autoClickCategories(raw_info.descr)
+
+                    // 5) 匿名
+                    if (if_uplver) {
+                        await RousiKit.setCheckbox("#torrent-anonymous", true)
+                    }
+
+                    console.log("[RouSi fill] 完成", r)
+                } catch (e) {
+                    console.warn("[RouSi fill] 失败:", e.message)
+                }
+            }
+
+            // 轻量轮询 watcher（500ms）：一旦检测到已选定种子文件就清理自身并触发一次填充。
+            // 相比死循环 setInterval，只跑一轮、不会重复提交表单。
+            const watcher = setInterval(() => {
+                const fileInput = document.querySelector('input[type="file"]')
+                if (fileInput?.files?.length) {
+                    clearInterval(watcher)
+                    run(raw_info, mediainfo_mteam, if_uplver)
+                }
+            }, 500)
         }
+
 
 	    else if (forward_site == '财神') {
             //类型
