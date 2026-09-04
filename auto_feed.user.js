@@ -21647,7 +21647,6 @@ function auto_feed() {
              * 任一张下载失败只告警跳过，不中断整体。
              */
             async function addScreenshots(pic_info) {
-                debugger
                 if (!pic_info) return
                 const input = document.querySelector('#torrent-screenshots')
                 if (!input?.files) return console.warn('找不到截图上传组件 #torrent-screenshots')
